@@ -1,0 +1,1210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Organizational Chart Editor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            overflow: hidden;
+            background-color: #f8fafc; /* slate-50 */
+        }
+        canvas { display: block; background-color: #f8fafc; cursor: default; }
+        .toolbar {
+            position: absolute;
+            top: 1rem;
+            display: flex;
+            gap: 0.75rem;
+            z-index: 10;
+            align-items: center;
+        }
+        .left-toolbar { left: 1rem; }
+        .right-toolbar { right: 1rem; }
+        .center-toolbar { left: 50%; transform: translateX(-50%); }
+
+        .flyout {
+            position: absolute;
+            top: calc(100% + 8px);
+            background-color: #fff;
+            border-radius: 0.5rem;
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+            border: 1px solid #e2e8f0;
+            padding: 0.75rem;
+            width: 240px;
+            visibility: hidden;
+            opacity: 0;
+            transition: opacity 0.2s, transform 0.2s;
+            transform: translateY(-10px);
+            pointer-events: none;
+            z-index: 11;
+        }
+        .right-toolbar .flyout {
+            right: 0;
+            left: auto;
+        }
+        .flyout.active {
+            visibility: visible;
+            opacity: 1;
+            transform: translateY(0);
+            pointer-events: auto;
+        }
+        .flyout-section { margin-bottom: 0.75rem; }
+        .flyout-section:last-child { margin-bottom: 0; }
+        .flyout-title {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #64748b;
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+        }
+        .flyout-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(38px, 1fr));
+            gap: 0.5rem;
+        }
+        
+        .tooltip-container { position: relative; }
+        .tooltip {
+            position: absolute;
+            left: 50%;
+            top: calc(100% + 8px);
+            transform: translateX(-50%);
+            background-color: #1e293b; color: white;
+            padding: 0.5rem 0.75rem; border-radius: 0.375rem;
+            font-size: 0.875rem; white-space: nowrap;
+            visibility: hidden; opacity: 0;
+            transition: opacity 0.2s; pointer-events: none;
+        }
+        .tooltip-container:hover .tooltip { visibility: visible; opacity: 1; }
+
+        .ui-button {
+            background-color: #ffffff; border: 1px solid #cbd5e1;
+            border-radius: 0.5rem; width: 42px; height: 42px;
+            display: flex; align-items: center; justify-content: center;
+            color: #334155; box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+            cursor: pointer; transition: all 0.2s ease;
+        }
+        .ui-button:hover:not(:disabled) { background-color: #f1f5f9; border-color: #94a3b8; }
+        .ui-button.active { background-color: #4f46e5; color: white; border-color: #4f46e5; }
+        .ui-button:disabled { opacity: 0.5; cursor: not-allowed; }
+        
+        .color-picker-container { padding: 4px; }
+        .color-picker {
+            -webkit-appearance: none; -moz-appearance: none; appearance: none;
+            width: 100%; height: 32px; padding: 0;
+            border: none; border-radius: 0.375rem; cursor: pointer;
+        }
+        .color-picker::-webkit-color-swatch { border-radius: 0.375rem; border: 1px solid #e2e8f0; }
+        .color-picker::-moz-color-swatch { border-radius: 0.375rem; border: 1px solid #e2e8f0; }
+        .recent-colors { display: flex; gap: 4px; margin-top: 4px; }
+        .color-swatch {
+            width: 22px; height: 22px;
+            border-radius: 4px; border: 1px solid #e2e8f0; cursor: pointer;
+        }
+        .file-button {
+            width: 100%; justify-content: flex-start;
+            background-color: #e0f2fe; border-color: #7dd3fc; color: #0c4a6e;
+        }
+        .file-button:hover:not(:disabled) { background-color: #bae6fd; }
+        
+        .instructions-container {
+            position: absolute; bottom: 1rem; left: 1rem;
+            background-color: rgba(255, 255, 255, 0.95);
+            border-radius: 0.5rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            border: 1px solid #e2e8f0; max-width: 250px; z-index: 10; overflow: hidden;
+        }
+        .instructions-header {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 0.5rem 1rem; cursor: pointer; user-select: none; background-color: #e9ecef;
+        }
+        #instructionsBody {
+            transition: all 0.3s ease-in-out; max-height: 500px; padding: 0 1rem 0.75rem 1rem;
+        }
+        #instructionsBody.collapsed { max-height: 0; padding: 0 1rem; }
+        #textEditor {
+            position: absolute; display: none; background-color: white;
+            border: 2px solid #4f46e5; border-radius: 4px; padding: 4px;
+            font-family: 'Inter', sans-serif; z-index: 20; box-shadow: 0 0 10px rgba(0,0,0,0.2); text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Top Left Toolbar -->
+    <div class="toolbar left-toolbar">
+        <div class="tooltip-container">
+            <button id="addBtn" class="ui-button">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
+            </button>
+            <div class="tooltip">Add Objects</div>
+            <div id="addFlyout" class="flyout">
+                <div class="flyout-section">
+                    <div class="flyout-title">Shapes</div>
+                    <div class="flyout-grid">
+                        <button class="ui-button" id="addRectBtn" title="Add Rectangle"><svg width="20" height="20" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="2"/></svg></button>
+                        <button class="ui-button" id="addEllipseBtn" title="Add Ellipse"><svg width="20" height="20" viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="9" ry="6" fill="none" stroke="currentColor" stroke-width="2"/></svg></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="tooltip-container">
+            <button id="connectModeBtn" class="ui-button">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M12 5l7 7-7 7"></path></svg>
+            </button>
+            <div class="tooltip">Draw Connection</div>
+        </div>
+        <div class="tooltip-container">
+            <button id="editBtn" class="ui-button">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="14 2 18 6 7 17 3 17 3 13 14 2"></polygon><line x1="3" y1="22" x2="21" y2="22"></line></svg>
+            </button>
+            <div id="editTooltip" class="tooltip">Edit Selection</div>
+            <div id="editFlyout" class="flyout"></div>
+        </div>
+        <div class="tooltip-container">
+            <button id="layoutBtn" class="ui-button">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+            </button>
+            <div class="tooltip">Auto-Layout</div>
+            <div id="layoutFlyout" class="flyout">
+                 <div class="flyout-section">
+                    <div class="flyout-title">Arrange Chart</div>
+                    <div class="flex flex-col gap-2">
+                        <button id="layoutStandardBtn" class="ui-button file-button">Standard Tree</button>
+                        <button id="layoutCompactBtn" class="ui-button file-button">Compact Tree</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Top Center Toolbar -->
+    <div class="toolbar center-toolbar">
+         <div class="tooltip-container">
+            <button id="resetViewBtn" class="ui-button">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2.812A9.959 9.959 0 0 1 12 2a9.959 9.959 0 0 1 9 1.812"></path><path d="M21 21.188A9.959 9.959 0 0 1 12 22a9.959 9.959 0 0 1-9-1.812"></path><path d="M2.812 21A9.959 9.959 0 0 1 2 12a9.959 9.959 0 0 1 1.812-9"></path><path d="M21.188 3A9.959 9.959 0 0 1 22 12a9.959 9.959 0 0 1-1.812 9"></path></svg>
+            </button>
+            <div class="tooltip">Reset View</div>
+        </div>
+        <div class="tooltip-container">
+            <button id="undoBtn" class="ui-button">
+                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 17l-5-5 5-5"></path><path d="M21 12H5"></path></svg>
+            </button>
+            <div id="undoTooltip" class="tooltip">Undo</div>
+        </div>
+        <div class="tooltip-container">
+            <button id="redoBtn" class="ui-button">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 17l5-5-5-5"></path><path d="M3 12h16"></path></svg>
+            </button>
+            <div id="redoTooltip" class="tooltip">Redo</div>
+        </div>
+    </div>
+
+    <!-- Top Right Toolbar -->
+    <div class="toolbar right-toolbar">
+        <div class="tooltip-container">
+            <button id="fileBtn" class="ui-button">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+            </button>
+            <div class="tooltip">File Options</div>
+            <div id="fileFlyout" class="flyout">
+                <div class="flyout-section">
+                    <div class="flyout-title">Save Work</div>
+                     <button id="exportJsonBtn" class="ui-button file-button">Export Chart Data (.json)</button>
+                </div>
+                 <div class="flyout-section">
+                    <div class="flyout-title">Load Work</div>
+                    <label for="importJsonInput" class="ui-button file-button file-input-label">Import Chart Data (.json)</label>
+                    <input type="file" id="importJsonInput" accept=".json,application/json" style="display: none;">
+                </div>
+                <div class="flyout-section">
+                    <div class="flyout-title">Export Image</div>
+                    <div class="flex flex-col gap-2">
+                        <button id="exportPngBtn" class="ui-button file-button">Export as PNG</button>
+                        <button id="exportSvgBtn" class="ui-button file-button">Export as SVG</button>
+                        <button id="exportJpegBtn" class="ui-button file-button">Export as JPEG</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div id="instructionsContainer" class="instructions-container">
+        <div id="instructionsHeader" class="instructions-header">
+            <p class="font-semibold text-slate-700">Instructions</p>
+            <span id="collapseBtn" class="font-mono font-bold text-slate-500">[–]</span>
+        </div>
+        <div id="instructionsBody">
+            <ul class="list-disc list-inside space-y-1 text-sm text-slate-600">
+                <li><strong>Pan:</strong> Hold Spacebar and drag.</li>
+                <li><strong>Zoom:</strong> Use the mouse wheel.</li>
+                <li><strong>Edit:</strong> Right-click an item or select and use the Edit button.</li>
+                <li><strong>Adjust Line:</strong> Drag the horizontal part of a solid line.</li>
+                <li><strong>Delete:</strong> Select an item, then press `Delete`.</li>
+                <li><strong>Save/Load:</strong> Use the "File" menu.</li>
+            </ul>
+        </div>
+    </div>
+
+    <div id="canvas-container">
+        <canvas id="orgChartCanvas"></canvas>
+    </div>
+    <input type="text" id="textEditor" />
+
+    <script>
+        // --- Canvas & UI Element Selection ---
+        const canvas = document.getElementById('orgChartCanvas');
+        const ctx = canvas.getContext('2d');
+        const editor = document.getElementById('textEditor');
+        const addBtn = document.getElementById('addBtn');
+        const addFlyout = document.getElementById('addFlyout');
+        const addRectBtn = document.getElementById('addRectBtn');
+        const addEllipseBtn = document.getElementById('addEllipseBtn');
+        const connectModeBtn = document.getElementById('connectModeBtn');
+        const editBtn = document.getElementById('editBtn');
+        const editFlyout = document.getElementById('editFlyout');
+        const layoutBtn = document.getElementById('layoutBtn');
+        const layoutFlyout = document.getElementById('layoutFlyout');
+        const layoutStandardBtn = document.getElementById('layoutStandardBtn');
+        const layoutCompactBtn = document.getElementById('layoutCompactBtn');
+        const undoBtn = document.getElementById('undoBtn');
+        const redoBtn = document.getElementById('redoBtn');
+        const resetViewBtn = document.getElementById('resetViewBtn');
+        const fileBtn = document.getElementById('fileBtn');
+        const fileFlyout = document.getElementById('fileFlyout');
+        const exportPngBtn = document.getElementById('exportPngBtn');
+        const exportSvgBtn = document.getElementById('exportSvgBtn');
+        const exportJpegBtn = document.getElementById('exportJpegBtn');
+        const exportJsonBtn = document.getElementById('exportJsonBtn');
+        const importJsonInput = document.getElementById('importJsonInput');
+        const instructionsHeader = document.getElementById('instructionsHeader');
+        const instructionsBody = document.getElementById('instructionsBody');
+        const collapseBtn = document.getElementById('collapseBtn');
+
+        // --- Data & State ---
+        let nodes = [];
+        let connections = [];
+        let history = [];
+        let redoStack = [];
+        let recentColors = ['#bae6fd', '#c7d2fe', '#d1d5db', '#fed7aa', '#fecaca', '#bbf7d0'];
+
+        let isDragging = false, draggedNode = null, dragOffsetX = 0, dragOffsetY = 0;
+        let isLineDragging = false, lineDragInfo = null;
+        let isConnecting = false, connectionStartNode = null;
+        let selectedItem = null;
+        let editingTarget = null;
+        let spacebarDown = false;
+        let isPanning = false;
+        let panStart = { x: 0, y: 0 };
+        let viewOffset = { x: 0, y: 0 };
+        let zoom = 1;
+
+        // --- Utility & Drawing Functions (Moved Up) ---
+        const getNodeById = id => nodes.find(n => n.id === id);
+        const getMousePos = e => ({ x: e.clientX - canvas.getBoundingClientRect().left, y: e.clientY - canvas.getBoundingClientRect().top });
+        const screenToWorld = (pos) => ({ x: (pos.x - viewOffset.x) / zoom, y: (pos.y - viewOffset.y) / zoom });
+        
+        function distSq(v, w) { return (v.x - w.x)**2 + (v.y - w.y)**2 }
+
+        function distToSegment(p, v, w) {
+            const l2 = distSq(v, w);
+            if (l2 === 0) return Math.sqrt(distSq(p, v));
+            let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2;
+            t = Math.max(0, Math.min(1, t));
+            return Math.sqrt(distSq(p, { x: v.x + t * (w.x - v.x), y: v.y + t * (w.y - v.y) }));
+        }
+        
+        function drawArrowhead(ctx, from, to, radius) {
+            const angle = Math.atan2(to.y - from.y, to.x - from.x);
+            ctx.save();
+            ctx.translate(to.x, to.y);
+            ctx.rotate(angle);
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(-radius, -radius / 2);
+            ctx.lineTo(-radius, radius / 2);
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+        }
+
+        function drawConnections(targetCtx, offsetX, offsetY, isExport) {
+            connections.forEach((conn, index) => {
+                const fromNode = getNodeById(conn.from);
+                const toNode = getNodeById(conn.to);
+                if (!fromNode || !toNode) return;
+
+                const isSelected = !isExport && selectedItem && selectedItem.type === 'connection' && selectedItem.index === index;
+                targetCtx.lineWidth = isSelected ? 4 : 2;
+                
+                if (conn.lineStyle === 'dotted') targetCtx.setLineDash([4, 4]);
+                else targetCtx.setLineDash([]);
+                
+                targetCtx.beginPath();
+                
+                let startX, startY, endX, endY, pathPoints = [];
+                
+                if (conn.type === 'straight') {
+                    targetCtx.strokeStyle = isSelected ? '#ef4444' : (conn.color || '#fb923c');
+                    startY = fromNode.y - offsetY + fromNode.height / 2;
+                    endY = toNode.y - offsetY + toNode.height / 2;
+                    startX = fromNode.x - offsetX + fromNode.width / 2;
+                    endX = toNode.x - offsetX + toNode.width / 2;
+                    pathPoints.push({x: startX, y: startY}, {x: endX, y: endY});
+                } else { // direct
+                    targetCtx.strokeStyle = isSelected ? '#ef4444' : (conn.color || '#94a3b8');
+                    startX = fromNode.x - offsetX + fromNode.width / 2;
+                    startY = fromNode.y - offsetY + fromNode.height;
+                    endX = toNode.x - offsetX + toNode.width / 2;
+                    endY = toNode.y - offsetY;
+                    const ratio = conn.midPointRatio || 0.5;
+                    const midY = startY + (endY - startY) * ratio;
+                    pathPoints.push({x: startX, y: startY}, {x: startX, y: midY}, {x: endX, y: midY}, {x: endX, y: endY});
+                }
+
+                targetCtx.moveTo(pathPoints[0].x, pathPoints[0].y);
+                for (let i = 1; i < pathPoints.length; i++) {
+                    targetCtx.lineTo(pathPoints[i].x, pathPoints[i].y);
+                }
+                targetCtx.stroke();
+                
+                targetCtx.fillStyle = targetCtx.strokeStyle;
+                if (conn.startHead === 'arrow') drawArrowhead(targetCtx, pathPoints[1], pathPoints[0], 10);
+                if (conn.endHead === 'arrow') drawArrowhead(targetCtx, pathPoints[pathPoints.length-2], pathPoints[pathPoints.length-1], 10);
+                if (conn.startHead === 'dot') { targetCtx.beginPath(); targetCtx.arc(pathPoints[0].x, pathPoints[0].y, 4, 0, 2 * Math.PI); targetCtx.fill(); }
+                if (conn.endHead === 'dot') { targetCtx.beginPath(); targetCtx.arc(pathPoints[pathPoints.length-1].x, pathPoints[pathPoints.length-1].y, 4, 0, 2 * Math.PI); targetCtx.fill(); }
+
+
+                if (conn.label) {
+                    targetCtx.font = '600 12px Inter';
+                    const labelX = (pathPoints[0].x + pathPoints[pathPoints.length-1].x) / 2;
+                    const labelY = (pathPoints[0].y + pathPoints[pathPoints.length-1].y) / 2 - 8;
+                    targetCtx.fillText(conn.label, labelX, labelY);
+                }
+            });
+            targetCtx.setLineDash([]);
+        }
+
+        function drawNode(node, targetCtx, offsetX, offsetY, isExport) {
+            const isSelected = !isExport && selectedItem && selectedItem.type === 'node' && selectedItem.id === node.id;
+            const x = node.x - offsetX;
+            const y = node.y - offsetY;
+
+            targetCtx.fillStyle = '#ffffff';
+            targetCtx.strokeStyle = isSelected ? '#ef4444' : '#cbd5e1';
+            targetCtx.lineWidth = isSelected ? 3 : 1.5;
+            targetCtx.beginPath();
+            
+            if (node.shape === 'ellipse') {
+                targetCtx.ellipse(x + node.width / 2, y + node.height / 2, node.width / 2, node.height / 2, 0, 0, 2 * Math.PI);
+            } else {
+                targetCtx.roundRect(x, y, node.width, node.height, 8);
+            }
+            
+            targetCtx.fill();
+            targetCtx.stroke();
+
+            targetCtx.fillStyle = node.color;
+            targetCtx.beginPath();
+            if (node.shape === 'ellipse') {
+                targetCtx.save();
+                targetCtx.beginPath();
+                targetCtx.ellipse(x + node.width / 2, y + node.height / 2, node.width / 2, node.height / 2, 0, 0, 2 * Math.PI);
+                targetCtx.clip();
+                targetCtx.fillRect(x, y, 8, node.height);
+                targetCtx.restore();
+            } else {
+                targetCtx.roundRect(x, y, 8, node.height, [8, 0, 0, 8]);
+            }
+            targetCtx.fill();
+
+            targetCtx.fillStyle = '#1e293b';
+            targetCtx.textAlign = 'center';
+            targetCtx.textBaseline = 'middle';
+            
+            targetCtx.font = '700 15px Inter';
+            const nameY = y + (node.title ? node.height * 0.35 : node.height * 0.5);
+            targetCtx.fillText(node.name, x + node.width / 2, nameY);
+
+            if (node.title) {
+                targetCtx.font = '500 13px Inter';
+                targetCtx.fillStyle = '#475569';
+                const titleY = y + node.height * 0.65;
+                wrapText(targetCtx, node.title, x + node.width / 2, titleY, node.width - 20, 15);
+            }
+        }
+
+        function wrapText(targetCtx, text, x, y, maxWidth, lineHeight) {
+            const words = text.split(' ');
+            let line = '';
+            for (let n = 0; n < words.length; n++) {
+                const testLine = line + words[n] + ' ';
+                const metrics = targetCtx.measureText(testLine);
+                if (metrics.width > maxWidth && n > 0) {
+                    targetCtx.fillText(line, x, y);
+                    line = words[n] + ' ';
+                    y += lineHeight;
+                } else {
+                    line = testLine;
+                }
+            }
+            targetCtx.fillText(line, x, y);
+        }
+
+        function draw() {
+            ctx.save();
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.translate(viewOffset.x, viewOffset.y);
+            ctx.scale(zoom, zoom);
+
+            const isExport = false;
+            drawConnections(ctx, 0, 0, isExport);
+            if (!isExport && isConnecting && connectionStartNode) {
+                const mousePos = screenToWorld(lastMousePos || {x:0, y:0});
+                ctx.beginPath();
+                ctx.moveTo(connectionStartNode.x + connectionStartNode.width / 2, connectionStartNode.y + connectionStartNode.height / 2);
+                ctx.lineTo(mousePos.x, mousePos.y);
+                ctx.strokeStyle = '#4f46e5';
+                ctx.setLineDash([5, 5]);
+                ctx.stroke();
+            }
+            nodes.forEach(node => drawNode(node, ctx, 0, 0, isExport));
+            ctx.restore();
+        }
+
+        // --- History Management ---
+        function saveState() {
+            history.push(JSON.stringify({ nodes, connections, recentColors }));
+            redoStack = []; // Clear redo stack on new action
+            updateUI();
+        }
+
+        function undo() {
+            if (history.length > 0) {
+                const currentState = JSON.stringify({ nodes, connections, recentColors });
+                redoStack.push(currentState);
+                const lastState = JSON.parse(history.pop());
+                loadState(lastState);
+            }
+        }
+
+        function redo() {
+            if (redoStack.length > 0) {
+                const currentState = JSON.stringify({ nodes, connections, recentColors });
+                history.push(currentState);
+                const nextState = JSON.parse(redoStack.pop());
+                loadState(nextState);
+            }
+        }
+        
+        function loadState(state) {
+            nodes = state.nodes;
+            connections = state.connections;
+            recentColors = state.recentColors || recentColors;
+            selectedItem = null;
+            draw();
+            updateUI();
+        }
+
+        // --- UI Management ---
+        function updateUI() {
+            updateButtonStates();
+            updateEditFlyout();
+        }
+
+        function updateButtonStates() {
+            const isItemSelected = !!selectedItem;
+            editBtn.style.display = isItemSelected ? 'flex' : 'none';
+            
+            undoBtn.disabled = history.length === 0;
+            document.getElementById('undoTooltip').textContent = history.length > 0 ? 'Undo' : 'No actions to undo';
+            
+            redoBtn.disabled = redoStack.length === 0;
+            document.getElementById('redoTooltip').textContent = redoStack.length > 0 ? 'Redo' : 'No actions to redo';
+        }
+
+        function updateEditFlyout() {
+            if (!selectedItem) {
+                editFlyout.classList.remove('active');
+                return;
+            }
+
+            let content = '';
+            if (selectedItem.type === 'node') {
+                const node = getNodeById(selectedItem.id);
+                content = `
+                    <div class="flyout-section">
+                        <div class="flyout-title">Role Color</div>
+                        <div class="color-picker-container">
+                            <input type="color" class="color-picker" value="${node.color}">
+                            <div class="recent-colors"></div>
+                        </div>
+                    </div>
+                     <div class="flyout-section">
+                        <div class="flyout-title">Text Layout</div>
+                        <div class="flyout-grid">
+                           <button class="ui-button" data-action="toggle-text-layout" title="Toggle Text Layout"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+                        </div>
+                    </div>
+                     <div class="flyout-section">
+                        <div class="flyout-title">Color Bar</div>
+                        <div class="flyout-grid">
+                           <button class="ui-button" data-action="set-bar-pos" data-pos="left" title="Bar Left"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h4v16H4z"/></svg></button>
+                           <button class="ui-button" data-action="set-bar-pos" data-pos="right" title="Bar Right"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M16 4h4v16h-4z"/></svg></button>
+                           <button class="ui-button" data-action="set-bar-pos" data-pos="top" title="Bar Top"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h16v4H4z"/></svg></button>
+                           <button class="ui-button" data-action="set-bar-pos" data-pos="bottom" title="Bar Bottom"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M4 16h16v4H4z"/></svg></button>
+                        </div>
+                    </div>
+                `;
+            } else if (selectedItem.type === 'connection') {
+                const conn = connections[selectedItem.index];
+                content = `
+                    <div class="flyout-section">
+                        <div class="flyout-title">Line Color</div>
+                        <div class="color-picker-container">
+                            <input type="color" class="color-picker" value="${conn.color || '#94a3b8'}">
+                            <div class="recent-colors"></div>
+                        </div>
+                    </div>
+                    <div class="flyout-section">
+                        <div class="flyout-title">Line Style</div>
+                        <div class="flyout-grid">
+                            <button class="ui-button" data-action="toggle-line-style" title="Solid/Dotted"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h.01M8 12h.01M12 12h.01M16 12h.01M20 12h.01"></path></svg></button>
+                            <button class="ui-button" data-action="toggle-line-type" title="Stepped/Straight"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path></svg></button>
+                        </div>
+                    </div>
+                    <div class="flyout-section">
+                        <div class="flyout-title">Line Ends</div>
+                        <div class="text-xs text-slate-500 mb-1">Start</div>
+                        <div class="flyout-grid">
+                            <button class="ui-button" data-action="set-start-head" data-head="none" title="Start: None"><svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><line x1="12" y1="5" x2="12" y2="19"></line></svg></button>
+                            <button class="ui-button" data-action="set-start-head" data-head="arrow" title="Start: Arrow"><svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M12 19V5l-7 7"/></svg></button>
+                            <button class="ui-button" data-action="set-start-head" data-head="dot" title="Start: Dot"><svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="currentColor"><circle cx="12" cy="12" r="3"></circle></svg></button>
+                        </div>
+                        <div class="text-xs text-slate-500 mt-2 mb-1">End</div>
+                        <div class="flyout-grid">
+                            <button class="ui-button" data-action="set-end-head" data-head="none" title="End: None"><svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><line x1="12" y1="5" x2="12" y2="19"></line></svg></button>
+                            <button class="ui-button" data-action="set-end-head" data-head="arrow" title="End: Arrow"><svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M12 5v14l7-7"/></svg></button>
+                            <button class="ui-button" data-action="set-end-head" data-head="dot" title="End: Dot"><svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="currentColor"><circle cx="12" cy="12" r="3"></circle></svg></button>
+                        </div>
+                    </div>
+                `;
+            }
+            editFlyout.innerHTML = content;
+            updateRecentColorsUI(editFlyout.querySelector('.recent-colors'));
+        }
+
+        function updateRecentColorsUI(container) {
+            if (!container) return;
+            container.innerHTML = '';
+            recentColors.forEach(color => {
+                const swatch = document.createElement('div');
+                swatch.className = 'color-swatch';
+                swatch.style.backgroundColor = color;
+                swatch.dataset.color = color;
+                container.appendChild(swatch);
+            });
+        }
+        
+        function addRecentColor(color) {
+            if (!color) return;
+            const index = recentColors.indexOf(color);
+            if (index > -1) recentColors.splice(index, 1);
+            recentColors.unshift(color);
+            if (recentColors.length > 6) recentColors.pop();
+            updateRecentColorsUI(editFlyout.querySelector('.recent-colors'));
+        }
+
+        // --- Event Handlers & Main Logic ---
+        function handleMouseDown(e) {
+            const mousePos = getMousePos(e);
+            if (spacebarDown) {
+                isPanning = true;
+                panStart = { x: mousePos.x - viewOffset.x, y: mousePos.y - viewOffset.y };
+                return;
+            }
+            const worldPos = screenToWorld(mousePos);
+            
+            if (editor.style.display === 'block') {
+                 saveAndHideEditor();
+                 return;
+            }
+
+            if (isConnecting) {
+                const clickedNode = nodes.find(node => worldPos.x >= node.x && worldPos.x <= node.x + node.width && worldPos.y >= node.y && worldPos.y <= node.y + node.height);
+                if (!connectionStartNode) {
+                    if (clickedNode) connectionStartNode = clickedNode;
+                } else {
+                    if (clickedNode && clickedNode.id !== connectionStartNode.id) {
+                        saveState();
+                        connections.push({ from: connectionStartNode.id, to: clickedNode.id, type: 'direct', lineStyle: 'solid', midPointRatio: 0.5, color: '#94a3b8' });
+                    }
+                    isConnecting = false;
+                    connectionStartNode = null;
+                    connectModeBtn.classList.remove('active');
+                }
+                draw();
+                return;
+            }
+
+            selectedItem = null;
+            const clickedNode = [...nodes].reverse().find(node => worldPos.x >= node.x && worldPos.x <= node.x + node.width && worldPos.y >= node.y && worldPos.y <= node.y + node.height);
+            if (clickedNode) {
+                selectedItem = { type: 'node', id: clickedNode.id };
+                isDragging = true;
+                draggedNode = clickedNode;
+                dragOffsetX = worldPos.x - clickedNode.x;
+                dragOffsetY = worldPos.y - clickedNode.y;
+            } else {
+                const { connIndex, segmentType } = findClickedConnection(worldPos);
+                if (connIndex !== -1) {
+                    selectedItem = { type: 'connection', index: connIndex };
+                    const conn = connections[connIndex];
+                    if (segmentType === 'horizontal' && conn.type === 'direct') {
+                        isLineDragging = true;
+                        const fromNode = getNodeById(conn.from);
+                        const toNode = getNodeById(conn.to);
+                        lineDragInfo = {
+                            connIndex: connIndex,
+                            startY: fromNode.y + fromNode.height,
+                            endY: toNode.y
+                        };
+                    }
+                }
+            }
+            updateUI();
+            draw();
+        }
+
+        function findClickedConnection(mousePos) {
+            let clickedConnectionIndex = -1;
+            let clickedSegmentType = null;
+            let minDistance = Infinity;
+
+            for (let i = 0; i < connections.length; i++) {
+                const conn = connections[i];
+                const fromNode = getNodeById(conn.from);
+                const toNode = getNodeById(conn.to);
+                if (!fromNode || !toNode) continue;
+
+                let segments = [];
+                if (conn.type === 'straight') {
+                    const startY = fromNode.y + fromNode.height / 2;
+                    const endY = toNode.y + toNode.height / 2;
+                    const startX = fromNode.x + fromNode.width / 2;
+                    const endX = toNode.x + toNode.width / 2;
+                    segments.push({ type: 'horizontal', points: [{x: startX, y: startY}, {x: endX, y: endY}] });
+                } else { // 'direct'
+                    const startX = fromNode.x + fromNode.width / 2;
+                    const startY = fromNode.y + fromNode.height;
+                    const endX = toNode.x + toNode.width / 2;
+                    const endY = toNode.y;
+                    const ratio = conn.midPointRatio || 0.5;
+                    const midY = startY + (endY - startY) * ratio;
+                    segments.push({ type: 'vertical', points: [{x: startX, y: startY}, {x: startX, y: midY}] });
+                    segments.push({ type: 'horizontal', points: [{x: startX, y: midY}, {x: endX, y: midY}] });
+                    segments.push({ type: 'vertical', points: [{x: endX, y: midY}, {x: endX, y: endY}] });
+                }
+
+                for (const segment of segments) {
+                    const distance = distToSegment(mousePos, segment.points[0], segment.points[1]);
+                    if (distance < 10 / zoom && distance < minDistance) {
+                        minDistance = distance;
+                        clickedConnectionIndex = i;
+                        clickedSegmentType = segment.type;
+                    }
+                }
+            }
+            return { connIndex: clickedConnectionIndex, segmentType: clickedSegmentType };
+        }
+        
+        let lastMousePos = null;
+        function handleMouseMove(e) {
+            lastMousePos = getMousePos(e);
+            if (isPanning) {
+                viewOffset.x = lastMousePos.x - panStart.x;
+                viewOffset.y = lastMousePos.y - panStart.y;
+                draw();
+                return;
+            }
+            const worldPos = screenToWorld(lastMousePos);
+
+            if (isDragging && draggedNode) {
+                draggedNode.x = worldPos.x - dragOffsetX;
+                draggedNode.y = worldPos.y - dragOffsetY;
+                draw();
+            } else if (isLineDragging && lineDragInfo) {
+                const { connIndex, startY, endY } = lineDragInfo;
+                const totalHeight = endY - startY;
+                let newRatio = 0.5;
+                if (totalHeight !== 0) {
+                    newRatio = (worldPos.y - startY) / totalHeight;
+                }
+                connections[connIndex].midPointRatio = Math.max(0.05, Math.min(0.95, newRatio));
+                draw();
+            } else {
+                 const { segmentType } = findClickedConnection(worldPos);
+                 const conn = connections[findClickedConnection(worldPos).connIndex];
+                 if (segmentType === 'horizontal' && conn && conn.type === 'direct') {
+                    canvas.style.cursor = 'ns-resize';
+                 } else {
+                    canvas.style.cursor = 'default';
+                 }
+            }
+        }
+
+        function handleMouseUp() {
+            if (isDragging || isLineDragging) {
+                saveState();
+            }
+            isDragging = false;
+            draggedNode = null;
+            isLineDragging = false;
+            lineDragInfo = null;
+            isPanning = false;
+        }
+
+        function handleDblClick(e) {
+            const mousePos = getMousePos(e);
+            const worldPos = screenToWorld(mousePos);
+            let clickedItem = null;
+
+            const clickedNode = [...nodes].reverse().find(node => worldPos.x >= node.x && worldPos.x <= node.x + node.width && worldPos.y >= node.y && worldPos.y <= node.y + node.height);
+            if (clickedNode) {
+                clickedItem = { type: 'node', target: clickedNode };
+            } else {
+                const { connIndex } = findClickedConnection(worldPos);
+                if (connIndex !== -1) {
+                    clickedItem = { type: 'connection', target: connections[connIndex] };
+                }
+            }
+
+            if (clickedItem) {
+                saveState();
+                if (clickedItem.type === 'node') {
+                    const node = clickedItem.target;
+                    const isTitleClick = worldPos.y > (node.y + node.height / 2);
+                    editingTarget = { item: node, field: isTitleClick ? 'title' : 'name' };
+                    editor.style.left = `${(node.x * zoom + viewOffset.x)}px`;
+                    editor.style.top = `${((isTitleClick ? (node.y + node.height/2) : node.y) * zoom + viewOffset.y)}px`;
+                    editor.style.width = `${node.width * zoom}px`;
+                    editor.style.height = `${(node.height / 2) * zoom}px`;
+                } else { // connection
+                    const conn = clickedItem.target;
+                    const fromNode = getNodeById(conn.from);
+                    const toNode = getNodeById(conn.to);
+                    const startX = fromNode.x + fromNode.width / 2;
+                    const endX = toNode.x + toNode.width / 2;
+                    const startY = fromNode.y + fromNode.height / 2;
+                    const endY = toNode.y + toNode.height / 2;
+                    const labelX = startX + (endX - startX) / 2;
+                    const labelY = startY + (endY - startY) / 2 - 8;
+                    editingTarget = { item: conn, field: 'label' };
+                    editor.style.left = `${(labelX - 50) * zoom + viewOffset.x}px`;
+                    editor.style.top = `${(labelY - 15) * zoom + viewOffset.y}px`;
+                    editor.style.width = `${100 * zoom}px`;
+                    editor.style.height = `${30 * zoom}px`;
+                }
+                
+                editor.style.display = 'block';
+                editor.value = editingTarget.item[editingTarget.field] || '';
+                editor.focus();
+            }
+        }
+
+        function saveAndHideEditor() {
+            if (editingTarget) {
+                editingTarget.item[editingTarget.field] = editor.value;
+                editingTarget = null;
+                editor.style.display = 'none';
+                draw();
+            }
+        }
+        
+        editor.addEventListener('keydown', e => {
+            e.stopPropagation();
+            if (e.key === 'Enter') saveAndHideEditor();
+            else if (e.key === 'Escape') {
+                editingTarget = null;
+                editor.style.display = 'none';
+            }
+        });
+
+        window.addEventListener('keydown', e => {
+            if (e.key === 'Delete' || e.key === 'Backspace') {
+                if (selectedItem) {
+                    saveState();
+                    if (selectedItem.type === 'node') {
+                        nodes = nodes.filter(n => n.id !== selectedItem.id);
+                        connections = connections.filter(c => c.from !== selectedItem.id && c.to !== selectedItem.id);
+                    } else if (selectedItem.type === 'connection') {
+                        connections.splice(selectedItem.index, 1);
+                    }
+                    selectedItem = null;
+                    draw();
+                    updateUI();
+                }
+            }
+            if (e.code === 'Space' && !spacebarDown && editor.style.display === 'none') {
+                e.preventDefault();
+                spacebarDown = true;
+                canvas.style.cursor = 'grab';
+            }
+        });
+        
+        window.addEventListener('keyup', e => {
+            if (e.code === 'Space') {
+                spacebarDown = false;
+                isPanning = false;
+                canvas.style.cursor = 'default';
+            }
+        });
+
+        canvas.addEventListener('wheel', e => {
+            e.preventDefault();
+            const mousePos = getMousePos(e);
+            const zoomFactor = 1.1;
+            const oldZoom = zoom;
+
+            if (e.deltaY < 0) { // Zoom in
+                zoom *= zoomFactor;
+            } else { // Zoom out
+                zoom /= zoomFactor;
+            }
+            zoom = Math.max(0.1, Math.min(5, zoom));
+
+            viewOffset.x = mousePos.x - (mousePos.x - viewOffset.x) * (zoom / oldZoom);
+            viewOffset.y = mousePos.y - (mousePos.y - viewOffset.y) * (zoom / oldZoom);
+
+            draw();
+        });
+        
+        // --- Flyout & Button Listeners ---
+        function setupFlyouts() {
+            const flyoutButtons = { addBtn: addFlyout, editBtn: editFlyout, fileBtn: fileFlyout, layoutBtn: layoutFlyout };
+            Object.entries(flyoutButtons).forEach(([btnId, flyout]) => {
+                const btn = document.getElementById(btnId);
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const isActive = flyout.classList.contains('active');
+                    document.querySelectorAll('.flyout').forEach(f => f.classList.remove('active'));
+                    if (!isActive) flyout.classList.add('active');
+                });
+            });
+            document.addEventListener('click', () => document.querySelectorAll('.flyout').forEach(f => f.classList.remove('active')));
+            document.querySelectorAll('.flyout').forEach(f => f.addEventListener('click', e => e.stopPropagation()));
+        }
+
+        addRectBtn.addEventListener('click', () => addNode('rectangle'));
+        addEllipseBtn.addEventListener('click', () => addNode('ellipse'));
+        
+        function addNode(shape) {
+            saveState();
+            const newNode = {
+                id: `node_${Date.now()}`, x: 50, y: 50, width: 200, height: 70,
+                name: 'New Role', title: 'Untitled', color: '#cccccc', shape: shape
+            };
+            nodes.push(newNode);
+            draw();
+        }
+
+        connectModeBtn.addEventListener('click', () => {
+            isConnecting = !isConnecting;
+            connectionStartNode = null;
+            connectModeBtn.classList.toggle('active', isConnecting);
+            addFlyout.classList.remove('active');
+        });
+        
+        editFlyout.addEventListener('click', (e) => {
+            const target = e.target.closest('button');
+            if (!target || !selectedItem) return;
+            
+            saveState();
+            if (selectedItem.type === 'connection') {
+                const action = target.dataset.action;
+                const conn = connections[selectedItem.index];
+                if (action === 'toggle-line-style') conn.lineStyle = conn.lineStyle === 'dotted' ? 'solid' : 'dotted';
+                if (action === 'toggle-line-type') conn.type = conn.type === 'direct' ? 'straight' : 'direct';
+                if (action === 'set-start-head') conn.startHead = target.dataset.head;
+                if (action === 'set-end-head') conn.endHead = target.dataset.head;
+            } else if (selectedItem.type === 'node') {
+                const action = target.dataset.action;
+                const node = getNodeById(selectedItem.id);
+                if (action === 'set-bar-pos') node.barPosition = target.dataset.pos;
+                if (action === 'toggle-text-layout') node.textLayout = node.textLayout === 'single' ? 'double' : 'single';
+            }
+            draw();
+            updateEditFlyout();
+        });
+
+        editFlyout.addEventListener('input', (e) => {
+            if (e.target.classList.contains('color-picker')) {
+                const color = e.target.value;
+                if (selectedItem?.type === 'node') getNodeById(selectedItem.id).color = color;
+                else if (selectedItem?.type === 'connection') connections[selectedItem.index].color = color;
+                draw();
+            }
+        });
+        editFlyout.addEventListener('change', (e) => {
+             if (e.target.classList.contains('color-picker')) {
+                addRecentColor(e.target.value);
+                saveState();
+             }
+        });
+        editFlyout.addEventListener('click', (e) => {
+            if (e.target.classList.contains('color-swatch')) {
+                const color = e.target.dataset.color;
+                if (selectedItem?.type === 'node') getNodeById(selectedItem.id).color = color;
+                else if (selectedItem?.type === 'connection') connections[selectedItem.index].color = color;
+                editFlyout.querySelector('.color-picker').value = color;
+                saveState();
+                draw();
+            }
+        });
+
+        undoBtn.addEventListener('click', undo);
+        redoBtn.addEventListener('click', redo);
+        resetViewBtn.addEventListener('click', () => {
+            viewOffset = { x: 0, y: 0 };
+            zoom = 1;
+            draw();
+        });
+
+
+        function getChartBounds() {
+            const padding = 50;
+            if (nodes.length === 0) return { minX: 0, minY: 0, width: padding * 2, height: padding * 2 };
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            nodes.forEach(node => {
+                minX = Math.min(minX, node.x);
+                minY = Math.min(minY, node.y);
+                maxX = Math.max(maxX, node.x + node.width);
+                maxY = Math.max(maxY, node.y + node.height);
+            });
+            return {
+                minX: minX - padding, minY: minY - padding,
+                width: (maxX - minX) + padding * 2, height: (maxY - minY) + padding * 2,
+            };
+        }
+
+        exportPngBtn.addEventListener('click', () => exportImage('png'));
+        exportJpegBtn.addEventListener('click', () => exportImage('jpeg'));
+
+        function exportImage(format) {
+            const bounds = getChartBounds();
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = bounds.width;
+            tempCanvas.height = bounds.height;
+            const tempCtx = tempCanvas.getContext('2d');
+            draw(tempCtx, { offsetX: bounds.minX, offsetY: bounds.minY, isExport: true });
+            const dataUrl = tempCanvas.toDataURL(`image/${format}`);
+            const link = document.createElement('a');
+            link.href = dataUrl;
+            link.download = `org-chart.${format}`;
+            link.click();
+        }
+
+        exportSvgBtn.addEventListener('click', () => {
+            const bounds = getChartBounds();
+            const { minX, minY, width, height } = bounds;
+            const escapeHTML = str => str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+            const svgWrapText = (text, maxWidth) => {
+                ctx.font = '500 13px Inter';
+                const words = text.split(' ');
+                let lines = [];
+                let currentLine = '';
+                for (const word of words) {
+                    const testLine = currentLine ? `${currentLine} ${word}` : word;
+                    if (ctx.measureText(testLine).width > maxWidth) { lines.push(currentLine); currentLine = word; } 
+                    else { currentLine = testLine; }
+                }
+                lines.push(currentLine);
+                return lines;
+            };
+
+            let svgElements = [];
+
+            connections.forEach(conn => {
+                const fromNode = getNodeById(conn.from);
+                const toNode = getNodeById(conn.to);
+                if (!fromNode || !toNode) return;
+
+                const defaultColor = conn.type === 'straight' ? '#fb923c' : '#94a3b8';
+                const stroke = conn.color || defaultColor;
+                const dash = conn.lineStyle === 'dotted' ? 'stroke-dasharray="4, 4"' : '';
+                
+                let pathData = '', startPoint, endPoint;
+                if (conn.type === 'straight') {
+                    const startY = fromNode.y + fromNode.height / 2;
+                    const endY = toNode.y + toNode.height / 2;
+                    const startX = fromNode.x + fromNode.width / 2;
+                    const endX = toNode.x + toNode.width / 2;
+                    pathData = `M${startX},${startY} L${endX},${endY}`;
+                    startPoint = {x: startX, y: startY}; endPoint = {x: endX, y: endY};
+                } else {
+                    const startX = fromNode.x + fromNode.width / 2;
+                    const startY = fromNode.y + fromNode.height;
+                    const endX = toNode.x + toNode.width / 2;
+                    const endY = toNode.y;
+                    const ratio = conn.midPointRatio || 0.5;
+                    const midY = startY + (endY - startY) * ratio;
+                    pathData = `M${startX},${startY} L${startX},${midY} L${endX},${midY} L${endX},${endY}`;
+                    startPoint = {x: startX, y: startY}; endPoint = {x: endX, y: endY};
+                }
+                svgElements.push(`<path d="${pathData}" stroke="${stroke}" stroke-width="2" fill="none" ${dash} />`);
+                
+                if (conn.label) {
+                    const labelX = (startPoint.x + endPoint.x) / 2;
+                    const labelY = (startPoint.y + endPoint.y) / 2 - 8;
+                    svgElements.push(`<text x="${labelX}" y="${labelY}" font-family="Inter, sans-serif" font-size="12" font-weight="600" fill="${stroke}" text-anchor="middle">${escapeHTML(conn.label)}</text>`);
+                }
+            });
+
+            nodes.forEach(node => {
+                const nameY = node.height * 0.35;
+                let titleHtml = '';
+                if (node.title) {
+                    const titleLines = svgWrapText(node.title, node.width - 20);
+                    let titleY = node.height * 0.65;
+                    titleLines.forEach((line, i) => {
+                        titleHtml += `<tspan x="${node.width / 2}" dy="${i === 0 ? 0 : 15}">${escapeHTML(line)}</tspan>`;
+                    });
+                     titleHtml = `<text x="${node.width / 2}" y="${titleY}" font-family="Inter, sans-serif" font-size="13" font-weight="500" fill="#475569" text-anchor="middle">${titleHtml}</text>`;
+                }
+
+                svgElements.push(`
+                    <g transform="translate(${node.x}, ${node.y})">
+                        <rect width="${node.width}" height="${node.height}" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" />
+                        <rect width="8" height="${node.height}" rx="8" ry="8" fill="${node.color}" clip-path="url(#clip-${node.id})" />
+                        <clipPath id="clip-${node.id}"><rect width="8" height="${node.height}" rx="8" ry="8"/></clipPath>
+                        <text x="${node.width / 2}" y="${nameY}" font-family="Inter, sans-serif" font-size="15" font-weight="700" fill="#1e293b" text-anchor="middle" dominant-baseline="middle">${escapeHTML(node.name)}</text>
+                        ${titleHtml}
+                    </g>
+                `);
+            });
+
+            const svgContent = `<svg width="${width}" height="${height}" viewBox="${minX} ${minY} ${width} ${height}" xmlns="http://www.w3.org/2000/svg">${svgElements.join('')}</svg>`;
+            const blob = new Blob([svgContent], { type: 'image/svg+xml' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = 'org-chart.svg';
+            link.click();
+            URL.revokeObjectURL(url);
+        });
+
+        exportJsonBtn.addEventListener('click', () => {
+            const data = JSON.stringify({ nodes, connections, recentColors }, null, 2);
+            const blob = new Blob([data], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = 'org-chart.json';
+            link.click();
+            URL.revokeObjectURL(url);
+        });
+
+        importJsonInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                try {
+                    const data = JSON.parse(event.target.result);
+                    if (data && Array.isArray(data.nodes) && Array.isArray(data.connections)) {
+                        saveState();
+                        loadState(data);
+                    } else alert('Invalid JSON file format.');
+                } catch (error) { alert('Error parsing JSON file: ' + error.message); }
+            };
+            reader.readAsText(file);
+            e.target.value = '';
+        });
+
+        instructionsHeader.addEventListener('click', () => {
+            instructionsBody.classList.toggle('collapsed');
+            collapseBtn.textContent = instructionsBody.classList.contains('collapsed') ? '[+]' : '[–]';
+        });
+
+        // --- Initialization ---
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            if(!initialLayoutDone) setInitialPositions();
+            draw();
+        }
+
+        let initialLayoutDone = false;
+        function setInitialPositions() {
+            nodes = [
+                { id: 'brandon', shape: 'rectangle', x: 0, y: 50, width: 220, height: 70, name: 'Brandon Lark', title: 'Group Vice President', color: '#bae6fd' },
+                { id: 'adam', shape: 'rectangle', x: 0, y: 220, width: 240, height: 80, name: 'Adam Modert', title: 'Process Innovation & Automation Director', color: '#c7d2fe' },
+                { id: 'travis', shape: 'rectangle', x: 0, y: 220, width: 220, height: 70, name: 'Travis Mathews', title: 'PMO Director', color: '#c7d2fe' },
+                { id: 'dps', shape: 'rectangle', x: 0, y: 400, width: 200, height: 80, name: 'Digital Process', title: 'Support Specialist (New Hire)', color: '#d1d5db' },
+                { id: 'pps', shape: 'rectangle', x: 0, y: 400, width: 200, height: 80, name: 'PMO Process & Standards', title: 'Specialist (New Hire)', color: '#d1d5db' },
+                { id: 'admin', shape: 'rectangle', x: 0, y: 400, width: 200, height: 80, name: 'Administrative Support', title: '(New Hire)', color: '#d1d5db' },
+                { id: 'epc', shape: 'rectangle', x: 0, y: 550, width: 200, height: 70, name: 'EPC PMO', title: '(Key Stakeholder)', color: '#fed7aa' },
+            ];
+            connections = [
+                { from: 'brandon', to: 'adam', type: 'direct', lineStyle: 'solid', midPointRatio: 0.5, color: '#94a3b8' }, 
+                { from: 'brandon', to: 'travis', type: 'direct', lineStyle: 'solid', midPointRatio: 0.5, color: '#94a3b8' },
+                { from: 'adam', to: 'dps', type: 'direct', lineStyle: 'solid', midPointRatio: 0.5, color: '#94a3b8' }, 
+                { from: 'travis', to: 'pps', type: 'direct', lineStyle: 'solid', midPointRatio: 0.5, color: '#94a3b8' },
+                { from: 'travis', to: 'admin', type: 'direct', lineStyle: 'solid', midPointRatio: 0.5, color: '#94a3b8' }, 
+                { from: 'pps', to: 'epc', type: 'direct', lineStyle: 'solid', midPointRatio: 0.5, color: '#94a3b8' },
+                { from: 'adam', to: 'travis', type: 'straight', lineStyle: 'dotted', label: 'Cross-Collaboration', color: '#fb923c' },
+            ];
+            const width = canvas.width;
+            const center = width / 2;
+            getNodeById('brandon').x = center - getNodeById('brandon').width / 2;
+            getNodeById('adam').x = center - 350;
+            getNodeById('travis').x = center + 110;
+            getNodeById('dps').x = getNodeById('adam').x + (getNodeById('adam').width - getNodeById('dps').width) / 2;
+            const travisCenterX = getNodeById('travis').x + getNodeById('travis').width / 2;
+            getNodeById('pps').x = travisCenterX - getNodeById('pps').width - 10;
+            getNodeById('admin').x = travisCenterX + 10;
+            getNodeById('epc').x = getNodeById('pps').x + (getNodeById('pps').width - getNodeById('epc').width) / 2;
+            initialLayoutDone = true;
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+        canvas.addEventListener('mousedown', handleMouseDown);
+        canvas.addEventListener('mousemove', handleMouseMove);
+        canvas.addEventListener('mouseup', handleMouseUp);
+        canvas.addEventListener('dblclick', handleDblClick);
+        canvas.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            const mousePos = getMousePos(e);
+            const worldPos = screenToWorld(mousePos);
+            let clickedItem = null;
+            const clickedNode = [...nodes].reverse().find(node => worldPos.x >= node.x && worldPos.x <= node.x + node.width && worldPos.y >= node.y && worldPos.y <= node.y + node.height);
+            if (clickedNode) {
+                clickedItem = { type: 'node', id: clickedNode.id };
+            } else {
+                const { connIndex } = findClickedConnection(worldPos);
+                if (connIndex !== -1) {
+                    clickedItem = { type: 'connection', index: connIndex };
+                }
+            }
+            if (clickedItem) {
+                selectedItem = clickedItem;
+                updateUI();
+                draw();
+                editFlyout.style.left = `${e.clientX}px`;
+                editFlyout.style.top = `${e.clientY}px`;
+                editFlyout.classList.add('active');
+            }
+        });
+        
+        // Final setup
+        setupFlyouts();
+        resizeCanvas();
+        instructionsBody.classList.add('collapsed');
+        collapseBtn.textContent = '[+]';
+        updateUI();
+
+    </script>
+</body>
+</html>
